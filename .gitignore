@@ -48,3 +48,13 @@ bun.lockb
 
 # LangGraph API
 .langgraph_api
+
+venv/
+__pycache__/
+*.pyc
+.env
+.vercel
+
+# python
+.venv/
+.langgraph_api/

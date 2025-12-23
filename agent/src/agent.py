@@ -3,8 +3,7 @@ This is the main entry point for the agent.
 It defines the workflow graph, state, tools, nodes and edges.
 """
 
-from importlib.resources import Resource
-from typing import Any, List
+from typing import List
 
 from copilotkit import CopilotKitState
 from langchain.tools import tool
@@ -30,7 +29,6 @@ class AgentState(CopilotKitState):
     """
 
     proverbs: List[str]
-    tools: List[Any]
     # your_custom_agent_state: str = ""
 
 
@@ -56,7 +54,7 @@ async def chat_node(
     model = ChatOpenAI(model="gpt-4o")
 
     # 2. Bind the tools to the model
-    fe_tools = state.get("tools", [])
+    fe_tools = state.get("copilotkit", {}).get("actions", [])
     model_with_tools = model.bind_tools(
         [
             *fe_tools,
