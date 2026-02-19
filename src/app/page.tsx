@@ -1,9 +1,8 @@
 "use client";
 
-import { ProverbsCard } from "@/components/proverbs";
-import { WeatherCard } from "@/components/weather";
-import { MoonCard } from "@/components/moon";
-import { AgentState } from "@/lib/types";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { CopilotKit } from "@copilotkit/react-core";
 import {
   useCoAgent,
   useFrontendTool,
@@ -11,12 +10,178 @@ import {
   useRenderToolCall,
 } from "@copilotkit/react-core";
 import { CopilotKitCSSProperties, CopilotSidebar } from "@copilotkit/react-ui";
-import { useState } from "react";
+import { ProverbsCard } from "@/components/proverbs";
+import { WeatherCard } from "@/components/weather";
+import { MoonCard } from "@/components/moon";
+import { AgentState } from "@/lib/types";
 
-export default function CopilotKitPage() {
+// ─── Thread Types & Persistence ──────────────────────────────────────────────
+
+const STORAGE_KEY = "copilotkit-threads";
+
+type Thread = {
+  id: string;
+  title: string;
+};
+
+function loadThreads(): Thread[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveThreads(threads: Thread[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(threads));
+  } catch {
+    // storage full or unavailable – ignore
+  }
+}
+
+// ─── Root Page ───────────────────────────────────────────────────────────────
+// Manages thread list + wraps CopilotKit with the active threadId.
+// Using `key={activeThreadId}` forces a full remount when switching threads,
+// giving each thread a clean conversation and shared-state context.
+
+export default function Home() {
+  return (
+    <Suspense>
+      <HomeInner />
+    </Suspense>
+  );
+}
+
+function HomeInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const threadParam = searchParams.get("thread");
+
+  const [threads, setThreads] = useState<Thread[]>(() => {
+    const saved = loadThreads();
+    const list = saved ?? [
+      { id: threadParam ?? crypto.randomUUID(), title: "Thread 1" },
+    ];
+    // If the URL points to a thread we don't have yet, add it
+    if (threadParam && !list.find((t) => t.id === threadParam)) {
+      list.push({ id: threadParam, title: `Thread ${list.length + 1}` });
+    }
+    return list;
+  });
+
+  const [activeThreadId, setActiveThreadId] = useState(
+    () => threadParam ?? threads[0].id,
+  );
+
+  // Persist threads to localStorage
+  useEffect(() => {
+    saveThreads(threads);
+  }, [threads]);
+
+  // Sync activeThreadId → URL
+  useEffect(() => {
+    const current = searchParams.get("thread");
+    if (current !== activeThreadId) {
+      router.replace(`?thread=${activeThreadId}`, { scroll: false });
+    }
+  }, [activeThreadId, router, searchParams]);
+
+  const createThread = useCallback(() => {
+    const thread: Thread = {
+      id: crypto.randomUUID(),
+      title: `Thread ${threads.length + 1}`,
+    };
+    setThreads((prev) => [...prev, thread]);
+    setActiveThreadId(thread.id);
+  }, [threads.length]);
+
+  const deleteThread = useCallback(
+    (id: string) => {
+      setThreads((prev) => {
+        if (prev.length <= 1) return prev;
+        const next = prev.filter((t) => t.id !== id);
+        if (activeThreadId === id) setActiveThreadId(next[0].id);
+        return next;
+      });
+    },
+    [activeThreadId],
+  );
+
+  return (
+    <div className="flex h-screen">
+      {/* ── Thread sidebar ─────────────────────────────────────────────── */}
+      <aside className="w-64 shrink-0 bg-zinc-900 text-white flex flex-col border-r border-zinc-800">
+        <div className="p-4 border-b border-zinc-800">
+          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+            Threads
+          </h2>
+          <button
+            onClick={createThread}
+            className="w-full px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer"
+          >
+            + New Thread
+          </button>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto p-2 space-y-1">
+          {threads.map((thread) => (
+            <div
+              key={thread.id}
+              onClick={() => setActiveThreadId(thread.id)}
+              className={`group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
+                activeThreadId === thread.id
+                  ? "bg-zinc-700 text-white"
+                  : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              }`}
+            >
+              <div className="min-w-0">
+                <span className="text-sm truncate block">{thread.title}</span>
+                <span className="text-[10px] text-zinc-500 truncate block font-mono">
+                  {thread.id.slice(0, 8)}
+                </span>
+              </div>
+              {threads.length > 1 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteThread(thread.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 transition-all ml-2 shrink-0 cursor-pointer"
+                >
+                  &times;
+                </button>
+              )}
+            </div>
+          ))}
+        </nav>
+      </aside>
+
+      {/* ── CopilotKit with active thread ──────────────────────────────── */}
+      <div className="flex-1 min-w-0">
+        <CopilotKit
+          key={activeThreadId}
+          runtimeUrl="/api/copilotkit"
+          agent="sample_agent"
+          threadId={activeThreadId}
+        >
+          <ChatWithAgent />
+        </CopilotKit>
+      </div>
+    </div>
+  );
+}
+
+// ─── Chat + Agent Hooks ──────────────────────────────────────────────────────
+// All CopilotKit hooks must live inside <CopilotKit>.
+
+function ChatWithAgent() {
   const [themeColor, setThemeColor] = useState("#6366f1");
 
-  // 🪁 Frontend Actions: https://docs.copilotkit.ai/pydantic-ai/frontend-actions
   useFrontendTool({
     name: "setThemeColor",
     parameters: [
@@ -43,7 +208,8 @@ export default function CopilotKitPage() {
         defaultOpen
         labels={{
           title: "Popup Assistant",
-          initial: "👋 Hi, there! You're chatting with an agent.",
+          initial:
+            "Hi! Each thread has its own conversation and shared state. Try switching threads!",
         }}
         suggestions={[
           {
@@ -73,14 +239,15 @@ export default function CopilotKitPage() {
           },
         ]}
       >
-        <YourMainContent themeColor={themeColor} />
+        <MainContent themeColor={themeColor} />
       </CopilotSidebar>
     </main>
   );
 }
 
-function YourMainContent({ themeColor }: { themeColor: string }) {
-  // 🪁 Shared State: https://docs.copilotkit.ai/pydantic-ai/shared-state
+// ─── Main Content (shared state + generative UI + HITL) ──────────────────────
+
+function MainContent({ themeColor }: { themeColor: string }) {
   const { state, setState } = useCoAgent<AgentState>({
     name: "sample_agent",
     initialState: {
@@ -90,7 +257,6 @@ function YourMainContent({ themeColor }: { themeColor: string }) {
     },
   });
 
-  // 🪁 Frontend Actions: https://docs.copilotkit.ai/coagents/frontend-actions
   useFrontendTool({
     name: "updateProverbs",
     parameters: [
@@ -102,36 +268,29 @@ function YourMainContent({ themeColor }: { themeColor: string }) {
       },
     ],
     handler: ({ proverbs }) => {
-      setState({
-        ...state,
-        proverbs: proverbs,
-      });
+      setState({ ...state, proverbs });
     },
   });
 
-  //🪁 Generative UI: https://docs.copilotkit.ai/pydantic-ai/generative-ui
   useRenderToolCall(
     {
       name: "get_weather",
       description: "Get the weather for a given location.",
       parameters: [{ name: "location", type: "string", required: true }],
-      render: ({ args }) => {
-        return <WeatherCard location={args.location} themeColor={themeColor} />;
-      },
+      render: ({ args }) => (
+        <WeatherCard location={args.location} themeColor={themeColor} />
+      ),
     },
     [themeColor],
   );
 
-  // 🪁 Human In the Loop: https://docs.copilotkit.ai/pydantic-ai/human-in-the-loop
   useHumanInTheLoop(
     {
       name: "go_to_moon",
       description: "Go to the moon on request.",
-      render: ({ respond, status }) => {
-        return (
-          <MoonCard themeColor={themeColor} status={status} respond={respond} />
-        );
-      },
+      render: ({ respond, status }) => (
+        <MoonCard themeColor={themeColor} status={status} respond={respond} />
+      ),
     },
     [themeColor],
   );

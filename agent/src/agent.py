@@ -10,7 +10,11 @@ from langchain.tools import tool
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
+import os
+
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg import Connection
 from langgraph.graph import StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
@@ -91,5 +95,13 @@ workflow.add_node("tool_node", ToolNode(tools=tools))
 workflow.add_edge("tool_node", "chat_node")
 workflow.set_entry_point("chat_node")
 
-checkpointer = MemorySaver()
-graph = workflow.compile(checkpointer=checkpointer)
+# Run postgres migrations at import time (sync is fine here)
+postgres_url = os.getenv("DATABASE_URL")
+if postgres_url:
+    _conn = Connection.connect(postgres_url, autocommit=True)
+    PostgresSaver(_conn).setup()
+    _conn.close()
+
+# Default graph with in-memory checkpointer.
+# main.py swaps in AsyncPostgresSaver via lifespan when DATABASE_URL is set.
+graph = workflow.compile(checkpointer=MemorySaver())

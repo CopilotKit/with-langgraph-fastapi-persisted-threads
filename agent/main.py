@@ -1,22 +1,44 @@
 import os
 import warnings
+from contextlib import asynccontextmanager
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 import uvicorn
-from src.agent import graph
+
+from src.agent import graph, workflow
 from copilotkit import LangGraphAGUIAgent
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 
 _ = load_dotenv()
-app = FastAPI()
+
+agent = LangGraphAGUIAgent(
+    name="sample_agent",
+    description="An example agent to use as a starting point for your own agent.",
+    graph=graph,
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Swap in AsyncPostgresSaver once the event loop is running."""
+    postgres_url = os.getenv("DATABASE_URL")
+    if postgres_url:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        async with AsyncPostgresSaver.from_conn_string(postgres_url) as checkpointer:
+            await checkpointer.setup()
+            agent.graph = workflow.compile(checkpointer=checkpointer)
+            yield
+    else:
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 add_langgraph_fastapi_endpoint(
     app=app,
-    agent=LangGraphAGUIAgent(
-        name="sample_agent",
-        description="An example agent to use as a starting point for your own agent.",
-        graph=graph,
-    ),
+    agent=agent,
     path="/",
 )
 
