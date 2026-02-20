@@ -9,7 +9,7 @@ export function getPool(): Pool | null {
     const cleanUrl = url.replace(/[?&]sslmode=[^&]*/g, "").replace(/\?$/, "");
     pool = new Pool({
       connectionString: cleanUrl,
-      max: 5,
+      max: 1,
       ssl: { rejectUnauthorized: false },
     });
   }
