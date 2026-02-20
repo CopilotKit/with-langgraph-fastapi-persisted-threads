@@ -1,0 +1,2 @@
+overrides:
+  '@copilotkit/runtime': link:../CopilotKit/packages/v1/runtime

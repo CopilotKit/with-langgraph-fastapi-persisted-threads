@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 import uvicorn
+import psycopg
 
 from src.agent import graph, workflow
 from copilotkit import LangGraphAGUIAgent
@@ -35,6 +36,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/threads")
+async def list_threads():
+    """Return distinct thread IDs from the checkpoint store."""
+    postgres_url = os.getenv("DATABASE_URL")
+    if not postgres_url:
+        return []
+
+    async with await psycopg.AsyncConnection.connect(postgres_url) as conn:
+        rows = await (
+            await conn.execute(
+                "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id"
+            )
+        ).fetchall()
+
+    return [row[0] for row in rows]
+
 
 add_langgraph_fastapi_endpoint(
     app=app,

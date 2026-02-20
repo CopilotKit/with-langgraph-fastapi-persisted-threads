@@ -15,39 +15,14 @@ import { WeatherCard } from "@/components/weather";
 import { MoonCard } from "@/components/moon";
 import { AgentState } from "@/lib/types";
 
-// ─── Thread Types & Persistence ──────────────────────────────────────────────
-
-const STORAGE_KEY = "copilotkit-threads";
+// ─── Thread Types ────────────────────────────────────────────────────────────
 
 type Thread = {
   id: string;
   title: string;
 };
 
-function loadThreads(): Thread[] | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveThreads(threads: Thread[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(threads));
-  } catch {
-    // storage full or unavailable – ignore
-  }
-}
-
 // ─── Root Page ───────────────────────────────────────────────────────────────
-// Manages thread list + wraps CopilotKit with the active threadId.
-// Using `key={activeThreadId}` forces a full remount when switching threads,
-// giving each thread a clean conversation and shared-state context.
 
 export default function Home() {
   return (
@@ -63,25 +38,41 @@ function HomeInner() {
   const threadParam = searchParams.get("thread");
 
   const [threads, setThreads] = useState<Thread[]>(() => {
-    const saved = loadThreads();
-    const list = saved ?? [
-      { id: threadParam ?? crypto.randomUUID(), title: "Thread 1" },
-    ];
-    // If the URL points to a thread we don't have yet, add it
-    if (threadParam && !list.find((t) => t.id === threadParam)) {
-      list.push({ id: threadParam, title: `Thread ${list.length + 1}` });
-    }
-    return list;
+    const id = threadParam ?? crypto.randomUUID();
+    return [{ id, title: "Thread 1" }];
   });
 
   const [activeThreadId, setActiveThreadId] = useState(
     () => threadParam ?? threads[0].id,
   );
 
-  // Persist threads to localStorage
+  // Load threads from the database on mount
   useEffect(() => {
-    saveThreads(threads);
-  }, [threads]);
+    fetch("/api/threads")
+      .then((r) => r.json())
+      .then((ids: string[]) => {
+        if (ids.length === 0) return;
+        const loaded = ids.map((id, i) => ({ id, title: `Thread ${i + 1}` }));
+
+        // If the URL points to a thread not in the DB, add it
+        if (threadParam && !ids.includes(threadParam)) {
+          loaded.push({
+            id: threadParam,
+            title: `Thread ${loaded.length + 1}`,
+          });
+        }
+
+        setThreads(loaded);
+        if (threadParam && ids.includes(threadParam)) {
+          setActiveThreadId(threadParam);
+        } else {
+          setActiveThreadId(loaded[0].id);
+        }
+      })
+      .catch(() => {
+        // Agent not reachable yet — keep the default thread
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync activeThreadId → URL
   useEffect(() => {
@@ -164,7 +155,6 @@ function HomeInner() {
       {/* ── CopilotKit with active thread ──────────────────────────────── */}
       <div className="flex-1 min-w-0">
         <CopilotKit
-          key={activeThreadId}
           runtimeUrl="/api/copilotkit"
           agent="sample_agent"
           threadId={activeThreadId}
