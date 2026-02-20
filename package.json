@@ -2,7 +2,6 @@
   "name": "langgraph-python-starter",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@10.30.0",
   "scripts": {
     "dev": "concurrently \"npm run dev:ui\" \"npm run dev:agent\" --names ui,agent --prefix-colors blue,green --kill-others",
     "dev:debug": "LOG_LEVEL=debug npm run dev",
@@ -28,11 +27,9 @@
     "shiki": "^3.13.0",
     "zod": "^3.24.4"
   },
-  "pnpm": {
-    "overrides": {
-      "@ag-ui/client": "0.0.45",
-      "@ag-ui/core": "0.0.45"
-    }
+  "overrides": {
+    "@ag-ui/client": "0.0.45",
+    "@ag-ui/core": "0.0.45"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
