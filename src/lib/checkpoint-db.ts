@@ -6,7 +6,9 @@ export function getPool(): Pool | null {
   const url = process.env.DATABASE_URL;
   if (!url) return null;
   if (!pool) {
-    const cleanUrl = url.replace(/[?&]sslmode=[^&]*/g, "").replace(/\?$/, "");
+    const parsed = new URL(url);
+    parsed.searchParams.delete("sslmode");
+    const cleanUrl = parsed.toString();
     pool = new Pool({
       connectionString: cleanUrl,
       max: 1,
